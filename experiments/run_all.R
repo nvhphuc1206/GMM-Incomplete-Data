@@ -19,6 +19,7 @@ source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))
 source(file.path(R_DIR, "imputation_baseline.R"))
+source(file.path(R_DIR, "dk_kmeans.R"))
 source(file.path(R_DIR, "evaluation.R"))
 
 `%||%` <- function(a, b) if (!is.null(a) && !is.na(a[1])) a else b
@@ -49,7 +50,7 @@ run_experiment_dataset <- function(dataset_name,
                                    verbose        = TRUE) {
 
   n <- nrow(X_orig); d <- ncol(X_orig)
-  methods <- c("Proposed", "Mean", "Zero", "EM")
+  methods <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
   metrics <- c("ACC", "NMI", "Fscore", "PUR")
 
   # Fixed patterns per dataset (load or generate)
@@ -133,6 +134,27 @@ run_experiment_dataset <- function(dataset_name,
           res_all$EM[run_idx, ] <- compute_metrics(labels, result$labels)
         }, error = function(e) NULL)
 
+        # ── DK + Mean ────────────────────────────────────────────────────────
+        tryCatch({
+          set.seed(seed_i)
+          dk_lab <- dk_kmeans(fills$data_mean, k, miss_mat)
+          res_all$DK_Mean[run_idx, ] <- compute_metrics(labels, dk_lab)
+        }, error = function(e) NULL)
+
+        # ── DK + Zero ────────────────────────────────────────────────────────
+        tryCatch({
+          set.seed(seed_i)
+          dk_lab <- dk_kmeans(fills$data_zero, k, miss_mat)
+          res_all$DK_Zero[run_idx, ] <- compute_metrics(labels, dk_lab)
+        }, error = function(e) NULL)
+
+        # ── DK + EM ──────────────────────────────────────────────────────────
+        tryCatch({
+          set.seed(seed_i)
+          dk_lab <- dk_kmeans(fills$data_em, k, miss_mat)
+          res_all$DK_EM[run_idx, ] <- compute_metrics(labels, dk_lab)
+        }, error = function(e) NULL)
+
         run_idx <- run_idx + 1
       }  # end inits
 
@@ -195,7 +217,7 @@ print_table2_row <- function(dataset_name, agg, methods) {
 # Main loop: chạy từng dataset
 # ─────────────────────────────────────────────────────────────────────────────
 all_results   <- list()
-methods       <- c("Proposed", "Mean", "Zero", "EM")
+methods       <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
 
 cat("╔══════════════════════════════════════════════════════╗\n")
 cat("║  GMM with Incomplete Data — R Replication            ║\n")
@@ -246,10 +268,11 @@ cat(sprintf("%-15s  %15s  %10s  %10s  %10s\n",
   "Dataset", "Proposed", "Mean", "Zero", "EM"))
 cat(strrep("─", 65), "\n")
 
+# Expected ACC% from Table 2: Proposed, Mean, Zero, EM, DK+Mean, DK+Zero, DK+EM
 expected <- list(
-  iris  = c(84.4, 61.3, 67.3, 76.0),
-  seeds = c(79.3, 56.6, 53.9, 64.7),
-  wine  = c(87.0, 58.0, 74.8, 81.8)
+  iris  = c(84.4, 61.3, 67.3, 76.0, 68.6, 70.7, 76.0),
+  seeds = c(79.3, 56.6, 53.9, 64.7,   NA,   NA,   NA),
+  wine  = c(87.0, 58.0, 74.8, 81.8,   NA,   NA,   NA)
 )
 
 for (ds_name in names(all_results)) {

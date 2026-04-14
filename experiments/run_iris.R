@@ -33,12 +33,13 @@ source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))            # regem_r() — phải load trước imputation_baseline
 source(file.path(R_DIR, "imputation_baseline.R"))
+source(file.path(R_DIR, "dk_kmeans.R"))        # dk_kmeans() — DK+Mean / DK+Zero / DK+EM
 source(file.path(R_DIR, "evaluation.R"))
 
 # ── Results / log dirs ────────────────────────────────────────────────────────
 RESULTS_DIR <- tryCatch({
   ofile <- sys.frame(1)$ofile %||% NULL
-  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results")
+  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results/iris")
   else                  file.path(getwd(), "..", "results")
 }, error = function(e) file.path(getwd(), "..", "results"))
 LOG_DIR <- file.path(RESULTS_DIR, "logs")
@@ -159,7 +160,7 @@ est_par_min   <- est_seq_min / n_workers
   SEED_BASE <- args$SEED_BASE
   KM_NSTART <- args$KM_NSTART
 
-  methods    <- c("Proposed", "Mean", "Zero", "EM")
+  methods    <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
   metrics    <- c("ACC", "NMI", "Fscore", "PUR")
   miss_empty <- matrix(FALSE, n, d)
 
@@ -213,6 +214,30 @@ est_par_min   <- est_seq_min / n_workers
       result <- gmm_incomplete(fills$data_em, k, miss_empty, km_c, 500, 1e-4)
       res_pat$EM[init_i, ] <- compute_metrics(labels, result$labels)
     }, error = function(e) NULL)
+
+    # ── DK methods: Dynamic K-means with iterative centroid-based filling ──
+    # Khớp kmeansfilling.m: init từ sample, fill missing ← centroid mỗi iter
+
+    # DK + Mean (raw data, mean-filled)
+    tryCatch({
+      set.seed(seed_i)
+      dk_lab <- dk_kmeans(fills$data_mean, k, miss_mat)
+      res_pat$DK_Mean[init_i, ] <- compute_metrics(labels, dk_lab)
+    }, error = function(e) NULL)
+
+    # DK + Zero (standardized, zero-filled)
+    tryCatch({
+      set.seed(seed_i)
+      dk_lab <- dk_kmeans(fills$data_zero, k, miss_mat)
+      res_pat$DK_Zero[init_i, ] <- compute_metrics(labels, dk_lab)
+    }, error = function(e) NULL)
+
+    # DK + EM (standardized, regem-filled)
+    tryCatch({
+      set.seed(seed_i)
+      dk_lab <- dk_kmeans(fills$data_em, k, miss_mat)
+      res_pat$DK_EM[init_i, ] <- compute_metrics(labels, dk_lab)
+    }, error = function(e) NULL)
   }
   res_pat
 }
@@ -228,6 +253,7 @@ if (USE_PARALLEL && N_CORES > 1L) {
     source(file.path(R_DIR, "gmm_incomplete.R"))
     source(file.path(R_DIR, "regem.R"))
     source(file.path(R_DIR, "imputation_baseline.R"))
+    source(file.path(R_DIR, "dk_kmeans.R"))
     source(file.path(R_DIR, "evaluation.R"))
     NULL
   })
@@ -236,7 +262,7 @@ if (USE_PARALLEL && N_CORES > 1L) {
 }
 
 # ── Main experiment loop ──────────────────────────────────────────────────────
-methods          <- c("Proposed", "Mean", "Zero", "EM")
+methods          <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
 results_by_ratio <- list()
 t_total_start    <- proc.time()["elapsed"]
 ratio_elapsed    <- numeric(length(MISSING_RATIOS))
@@ -332,12 +358,12 @@ for (ri in seq_along(MISSING_RATIOS)) {
     v["n_valid"], ratio_elapsed[ri])
   .log(msg)
 
-  # Log tất cả methods
+  # Log tất cả methods (console=FALSE để không làm loãng output)
   for (m in methods[-1]) {
     vv <- ratio_summary[[m]]
     .log(sprintf("  %-12s ACC=%5.1f±%4.1f%%  NMI=%5.1f±%4.1f%%",
       paste0(m, ":"), vv["ACC_mean"]*100, vv["ACC_sd"]*100,
-      vv["NMI_mean"]*100, vv["NMI_sd"]*100), console = FALSE)
+      vv["NMI_mean"]*100, vv["NMI_sd"]*100), console = (m %in% c("EM", "DK_EM")))
   }
 }
 
@@ -394,10 +420,19 @@ for (m in methods) {
     v["F_mean"]*100,   v["F_sd"]*100,
     v["PUR_mean"]*100, v["PUR_sd"]*100))
 }
-.log("Expected (Table 2 'Ours'): ACC≈84.4%, NMI≈66.3%, F≈84.8%, PUR≈84.6%")
+.log("── Expected (Table 2, Iris, ACC%) ──────────────────────────────────────")
+.log("  Mean=61.3  Zero=67.3  EM=76.0  DK+Mean=68.6  DK+Zero=70.7  DK+EM=76.0  Ours=84.4")
 diff_acc <- abs(agg_paper$Proposed["ACC_mean"]*100 - 84.4)
 .log(sprintf("Proposed ACC diff vs paper: %.1f pp  %s",
   diff_acc, if (diff_acc <= 3) "[PASS]" else "[> 3pp — kiểm tra lại]"))
+# DK diffs
+for (nm in list(c("DK_Mean","DK+Mean",68.6), c("DK_Zero","DK+Zero",70.7), c("DK_EM","DK+EM",76.0))) {
+  if (!is.null(agg_paper[[nm[[1]]]])) {
+    dv <- abs(agg_paper[[nm[[1]]]][["ACC_mean"]] * 100 - as.numeric(nm[[3]]))
+    .log(sprintf("%s ACC diff vs paper: %.1f pp  %s",
+      nm[[2]], dv, if (dv <= 5) "[OK]" else "[check]"))
+  }
+}
 
 # ── Ratio=0 riêng ─────────────────────────────────────────────────────────────
 if ("0" %in% names(results_by_ratio)) {

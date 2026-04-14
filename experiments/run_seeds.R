@@ -14,6 +14,7 @@ source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))
 source(file.path(R_DIR, "imputation_baseline.R"))
+source(file.path(R_DIR, "dk_kmeans.R"))
 source(file.path(R_DIR, "evaluation.R"))
 
 # ── Load Seeds ────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ N_INITS        <- 50
 N_PATTERNS     <- 20    # bài báo: 20 random patterns
 SEED_BASE      <- 42
 KM_NSTART      <- 3L    # K-means restarts để giảm SD
-methods        <- c("Proposed", "Mean", "Zero", "EM")
+methods        <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
 metrics        <- c("ACC", "NMI", "Fscore", "PUR")
 
 # ── Fixed patterns ─────────────────────────────────────────────────────────
@@ -139,6 +140,27 @@ for (ratio in MISSING_RATIOS) {
         res_all$EM[run_idx, ] <- compute_metrics(labels, result$labels)
       }, error = function(e) NULL)
 
+      # DK + Mean
+      tryCatch({
+        set.seed(seed_i)
+        dk_lab <- dk_kmeans(fills$data_mean, k, miss_mat)
+        res_all$DK_Mean[run_idx, ] <- compute_metrics(labels, dk_lab)
+      }, error = function(e) NULL)
+
+      # DK + Zero
+      tryCatch({
+        set.seed(seed_i)
+        dk_lab <- dk_kmeans(fills$data_zero, k, miss_mat)
+        res_all$DK_Zero[run_idx, ] <- compute_metrics(labels, dk_lab)
+      }, error = function(e) NULL)
+
+      # DK + EM
+      tryCatch({
+        set.seed(seed_i)
+        dk_lab <- dk_kmeans(fills$data_em, k, miss_mat)
+        res_all$DK_EM[run_idx, ] <- compute_metrics(labels, dk_lab)
+      }, error = function(e) NULL)
+
       run_idx <- run_idx + 1
     }
 
@@ -185,7 +207,7 @@ for (m in methods) {
   cat(sprintf("%-12s  %12.1f  %12.1f  %12.1f  %12.1f\n",
     m, avg[1], avg[2], avg[3], avg[4]))
 }
-cat("\nExpected 'Ours': ACC≈79.3%, NMI≈55.1%, F≈80.3%, PUR≈79.9%\n")
+cat("\nExpected (Table 2, Seeds, ACC%): Mean=56.6  Zero=53.9  EM=64.7  DK+Mean≈?  DK+Zero≈?  DK+EM≈?  Ours=79.3\n")
 
 # ── Lưu kết quả ──────────────────────────────────────────────────────────────
 RESULTS_DIR <- file.path(dirname(dirname(sys.frame(1)$ofile %||% ".")), "results")
