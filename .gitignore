@@ -1,0 +1,7 @@
+# R cache
+.Rproj.user/
+.R*
+gmm-incomplete-r.Rproj
+
+# Results
+results/
