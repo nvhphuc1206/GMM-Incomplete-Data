@@ -31,6 +31,7 @@ if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
 
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
+source(file.path(R_DIR, "regem.R"))            # regem_r() — phải load trước imputation_baseline
 source(file.path(R_DIR, "imputation_baseline.R"))
 source(file.path(R_DIR, "evaluation.R"))
 
@@ -45,6 +46,11 @@ for (d_ in c(RESULTS_DIR, LOG_DIR)) if (!dir.exists(d_)) dir.create(d_, recursiv
 
 RUN_TAG  <- format(Sys.time(), "%Y%m%d_%H%M%S")
 LOG_FILE <- file.path(LOG_DIR, sprintf("iris_%s.log", RUN_TAG))
+
+# ── Fixed patterns (cải thiện 2: generate once, reuse → giảm SD) ─────────────
+# Mục đích: khớp cách bài báo dùng 20 patterns cố định cho mỗi ratio.
+# File patterns được tạo lần đầu (theo seed), tái dùng ở các lần chạy sau.
+PATTERNS_FILE <- file.path(RESULTS_DIR, "iris_patterns.rds")
 
 # ── Log infrastructure ────────────────────────────────────────────────────────
 .log <- function(..., level = "INFO", console = TRUE) {
@@ -78,6 +84,41 @@ ds     <- load_dataset("iris")
 X_orig <- ds$X; labels <- ds$labels
 k      <- length(unique(labels)); n <- nrow(X_orig); d <- ncol(X_orig)
 
+# ── Load or generate fixed patterns ──────────────────────────────────────────
+.load_or_gen_patterns <- function(patterns_file, MISSING_RATIOS, N_PATTERNS,
+                                  X_orig, SEED_BASE, n, d) {
+  if (file.exists(patterns_file)) {
+    saved <- tryCatch(readRDS(patterns_file), error = function(e) NULL)
+    if (!is.null(saved) &&
+        isTRUE(saved$meta$N_PATTERNS    == N_PATTERNS)  &&
+        isTRUE(length(saved$meta$MISSING_RATIOS) == length(MISSING_RATIOS)) &&
+        isTRUE(saved$meta$n             == n)            &&
+        isTRUE(saved$meta$d             == d)) {
+      return(list(patterns = saved$patterns, loaded = TRUE))
+    }
+  }
+  # Generate patterns using same seeds as experiment loop
+  pats <- lapply(MISSING_RATIOS, function(ratio) {
+    lapply(seq_len(N_PATTERNS), function(pat) {
+      seed_pat <- SEED_BASE + pat * 1000L + round(ratio * 100)
+      X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
+      is.na(X_miss)   # logical n×d miss_mat
+    })
+  })
+  names(pats) <- as.character(MISSING_RATIOS)
+  saveRDS(list(
+    meta     = list(N_PATTERNS    = N_PATTERNS,
+                    MISSING_RATIOS = MISSING_RATIOS,
+                    n = n, d = d, SEED_BASE = SEED_BASE),
+    patterns = pats
+  ), patterns_file)
+  list(patterns = pats, loaded = FALSE)
+}
+
+pat_result <- .load_or_gen_patterns(
+  PATTERNS_FILE, MISSING_RATIOS, N_PATTERNS, X_orig, SEED_BASE, n, d)
+all_patterns <- pat_result$patterns
+
 # Ước tính thời gian
 secs_per_run  <- 0.05   # ~50ms per GMM run (Iris nhỏ)
 total_runs    <- length(MISSING_RATIOS) * N_PATTERNS * N_INITS
@@ -96,6 +137,10 @@ est_par_min   <- est_seq_min / n_workers
 .log(sprintf("Parallel  : %s (%d workers)",
   if (USE_PARALLEL) "YES" else "NO", n_workers))
 .log(sprintf("KM_NSTART : %d", KM_NSTART))
+.log(sprintf("EM fill   : regem (Schneider 2001, GCV ridge, maxit=10)"))
+.log(sprintf("Patterns  : %s (%d×%d)",
+  if (pat_result$loaded) "loaded from file" else "generated + saved",
+  N_PATTERNS, length(MISSING_RATIOS)))
 .log(sprintf("Est. time : ~%.0f min (seq) / ~%.0f min (par)",
   ceiling(est_seq_min), ceiling(est_par_min)))
 .log(sprintf("Log file  : %s", LOG_FILE))
@@ -122,9 +167,16 @@ est_par_min   <- est_seq_min / n_workers
     matrix(NA_real_, N_INITS, 4L, dimnames = list(NULL, metrics)))
   names(res_pat) <- methods
 
-  seed_pat <- SEED_BASE + pat * 1000L + round(ratio * 100)
-  X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
-  miss_mat <- is.na(X_miss)
+  # Use fixed pattern if provided (cải thiện 2: fixed patterns)
+  if (!is.null(args$miss_mat)) {
+    miss_mat <- args$miss_mat
+    X_miss   <- X_orig
+    X_miss[miss_mat] <- NA_real_
+  } else {
+    seed_pat <- SEED_BASE + pat * 1000L + round(ratio * 100)
+    X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
+    miss_mat <- is.na(X_miss)
+  }
   fills    <- prepare_all_fillings(X_miss)
 
   for (init_i in seq_len(N_INITS)) {
@@ -170,10 +222,11 @@ cl <- NULL
 if (USE_PARALLEL && N_CORES > 1L) {
   n_workers <- min(N_CORES, N_PATTERNS)
   cl <- parallel::makeCluster(n_workers)
-  parallel::clusterExport(cl, "R_DIR")
+  parallel::clusterExport(cl, c("R_DIR", "all_patterns"))
   parallel::clusterEvalQ(cl, {
     source(file.path(R_DIR, "data_utils.R"))
     source(file.path(R_DIR, "gmm_incomplete.R"))
+    source(file.path(R_DIR, "regem.R"))
     source(file.path(R_DIR, "imputation_baseline.R"))
     source(file.path(R_DIR, "evaluation.R"))
     NULL
@@ -200,12 +253,14 @@ for (ri in seq_along(MISSING_RATIOS)) {
     pct, ri, length(MISSING_RATIOS),
     .fmt_elapsed(elapsed_so_far), eta_str))
 
-  # Build args list for each pattern
+  # Build args list for each pattern (pass fixed miss_mat if available)
+  ratio_str    <- as.character(ratio)
   pattern_args <- lapply(seq_len(N_PATTERNS), function(pat) list(
-    pat = pat, ratio = ratio,
-    X_orig = X_orig, labels = labels,
+    pat      = pat,    ratio  = ratio,
+    X_orig   = X_orig, labels = labels,
     k = k, n = n, d = d,
-    N_INITS = N_INITS, SEED_BASE = SEED_BASE, KM_NSTART = KM_NSTART
+    N_INITS   = N_INITS, SEED_BASE = SEED_BASE, KM_NSTART = KM_NSTART,
+    miss_mat  = if (!is.null(all_patterns[[ratio_str]])) all_patterns[[ratio_str]][[pat]] else NULL
   ))
 
   # Run (parallel or sequential)
@@ -390,5 +445,6 @@ write.table(do.call(rbind, rows_agg), file.path(RESULTS_DIR, "iris_table2.tsv"),
 .log("──────────────────────────────────────────────────────")
 .log(sprintf("Saved: %s/iris_per_ratio.tsv", RESULTS_DIR))
 .log(sprintf("Saved: %s/iris_table2.tsv",    RESULTS_DIR))
+.log(sprintf("Pats : %s",                    PATTERNS_FILE))
 .log(sprintf("Log  : %s", LOG_FILE))
 .log(sprintf("DONE. Total time: %s", .fmt_elapsed(total_elapsed)))

@@ -12,6 +12,7 @@ if (!file.exists(file.path(R_DIR, "gmm_incomplete.R"))) {
 
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
+source(file.path(R_DIR, "regem.R"))
 source(file.path(R_DIR, "imputation_baseline.R"))
 source(file.path(R_DIR, "evaluation.R"))
 
@@ -53,6 +54,38 @@ KM_NSTART      <- 3L    # K-means restarts để giảm SD
 methods        <- c("Proposed", "Mean", "Zero", "EM")
 metrics        <- c("ACC", "NMI", "Fscore", "PUR")
 
+# ── Fixed patterns ─────────────────────────────────────────────────────────
+RESULTS_DIR <- file.path(dirname(dirname(sys.frame(1)$ofile %||% ".")), "results")
+if (!dir.exists(RESULTS_DIR)) dir.create(RESULTS_DIR, recursive = TRUE)
+PATTERNS_FILE <- file.path(RESULTS_DIR, "seeds_patterns.rds")
+
+all_patterns <- local({
+  if (file.exists(PATTERNS_FILE)) {
+    saved <- tryCatch(readRDS(PATTERNS_FILE), error = function(e) NULL)
+    if (!is.null(saved) &&
+        isTRUE(saved$meta$N_PATTERNS == N_PATTERNS) &&
+        isTRUE(saved$meta$n          == n)) {
+      cat(sprintf("  Loaded fixed patterns from %s\n", PATTERNS_FILE))
+      return(saved$patterns)
+    }
+  }
+  cat("  Generating and saving fixed patterns...\n")
+  pats <- lapply(MISSING_RATIOS, function(ratio) {
+    lapply(seq_len(N_PATTERNS), function(pat) {
+      seed_pat <- SEED_BASE + pat * 1000L + round(ratio * 100)
+      X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
+      is.na(X_miss)
+    })
+  })
+  names(pats) <- as.character(MISSING_RATIOS)
+  saveRDS(list(meta     = list(N_PATTERNS = N_PATTERNS, n = n, d = d,
+                               MISSING_RATIOS = MISSING_RATIOS),
+               patterns = pats),
+          PATTERNS_FILE)
+  cat(sprintf("  Patterns saved: %s\n", PATTERNS_FILE))
+  pats
+})
+
 results_by_ratio <- list()
 
 for (ratio in MISSING_RATIOS) {
@@ -65,9 +98,10 @@ for (ratio in MISSING_RATIOS) {
   run_idx <- 1
 
   for (pat in seq_len(N_PATTERNS)) {
-    seed_pat <- SEED_BASE + pat * 1000 + round(ratio * 100)
-    X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
-    miss_mat <- is.na(X_miss)
+    # Use fixed pattern (cải thiện 2)
+    miss_mat <- all_patterns[[as.character(ratio)]][[pat]]
+    X_miss   <- X_orig
+    X_miss[miss_mat] <- NA_real_
     fills    <- prepare_all_fillings(X_miss)
 
     for (init_i in seq_len(N_INITS)) {

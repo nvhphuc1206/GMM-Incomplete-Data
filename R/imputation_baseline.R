@@ -38,67 +38,45 @@ zero_filling <- function(X) {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. EM Filling — xấp xỉ DataCompletion(X, 'EM') trong MATLAB
-#    Dùng Gaussian conditional-mean imputation (lặp EM đơn giản)
-#    Áp dụng trên data ĐÃ standardize_rms
+# 3. EM Filling — khớp DataCompletion(X, 'EM') trong MATLAB
+#    Gọi regem_r() (Schneider 2001 regularized EM với GCV ridge regression).
+#    regem.R phải được source() trước khi gọi hàm này.
 #
-#    Ghi chú: MATLAB dùng regem() (Schneider regularized EM) với ridge penalty.
-#    R implementation dùng EM đơn giản (không regularize) — xấp xỉ tốt cho
-#    mục đích reproduce Table 2 (sai lệch ≤ 2-3% với baseline EM trong bảng).
+#    Tham số mặc định khớp MATLAB regem.m:
+#      max_iter = 10   (MATLAB default: maxit=10)
+#      stagtol  = 5e-2 (MATLAB default: stagtol=5e-2)
 # ─────────────────────────────────────────────────────────────────────────────
-em_filling <- function(X, max_iter = 100, tol = 1e-6) {
+em_filling <- function(X, max_iter = 10L, stagtol = 5e-2) {
   # X: ma trận n×d, có thể có NA (data đã standardize_rms)
   # Trả về: Xfill không còn NA
+  if (exists("regem_r", mode = "function", envir = .GlobalEnv) ||
+      exists("regem_r", mode = "function")) {
+    return(regem_r(X, max_iter = max_iter, stagtol = stagtol))
+  }
+  # Fallback: simple conditional-mean EM (nếu regem.R chưa được source)
+  warning("regem_r not found — using simple EM fallback. Source R/regem.R for better results.")
   n <- nrow(X); d <- ncol(X)
   Xfill <- X
-
-  # Bước 0: khởi tạo missing = column mean
   for (j in seq_len(d)) {
     nas <- is.na(Xfill[, j])
-    if (any(nas) && any(!nas)) {
-      Xfill[nas, j] <- mean(Xfill[!nas, j])
-    }
+    if (any(nas) && any(!nas)) Xfill[nas, j] <- mean(Xfill[!nas, j])
   }
-
-  for (iter in seq_len(max_iter)) {
-    Xold <- Xfill
-
-    # E: ước lượng mu và Sigma từ complete data hiện tại
-    mu_est <- colMeans(Xfill)
-    S      <- cov(Xfill)
-
-    # Regularization thích ứng: 10% của trung bình variance các chiều
-    # (mạnh hơn 1e-6 cũ — quan trọng ở high missing ratio để tránh ill-conditioned)
+  for (iter in seq_len(100L)) {
+    Xold      <- Xfill
+    mu_est    <- colMeans(Xfill)
+    S         <- cov(Xfill)
     lambda    <- max(1e-4, 0.10 * mean(diag(S)))
     Sigma_est <- S + lambda * diag(d)
-
-    # M: điền lại missing bằng conditional mean E[x_m | x_o, theta]
     for (i in seq_len(n)) {
-      miss_i <- which(is.na(X[i, ]))   # vị trí missing gốc (không đổi)
-      if (length(miss_i) == 0) next
-      obs_i  <- setdiff(seq_len(d), miss_i)
-
-      if (length(obs_i) == 0) {
-        # Toàn bộ chiều bị missing: dùng marginal mean
-        Xfill[i, miss_i] <- mu_est[miss_i]
-        next
-      }
-
-      xo       <- Xfill[i, obs_i]
-      muo      <- mu_est[obs_i]
-      mum      <- mu_est[miss_i]
-      Sigma_mo <- Sigma_est[miss_i, obs_i,  drop = FALSE]
-      Sigma_oo <- Sigma_est[obs_i,  obs_i,  drop = FALSE]
-
-      # Conditional mean: mu_m + Sigma_mo * Sigma_oo^{-1} * (xo - muo)
-      Xfill[i, miss_i] <- mum + as.vector(
-        Sigma_mo %*% solve(Sigma_oo, xo - muo)
-      )
+      mi <- which(is.na(X[i, ]))
+      if (length(mi) == 0L) next
+      oi <- setdiff(seq_len(d), mi)
+      if (length(oi) == 0L) { Xfill[i, mi] <- mu_est[mi]; next }
+      Xfill[i, mi] <- mu_est[mi] + as.vector(
+        Sigma_est[mi, oi, drop=FALSE] %*% solve(Sigma_est[oi, oi, drop=FALSE],
+                                                 Xfill[i, oi] - mu_est[oi]))
     }
-
-    # Kiểm tra hội tụ
-    diff_max <- max(abs(Xfill - Xold), na.rm = TRUE)
-    if (diff_max < tol) break
+    if (max(abs(Xfill - Xold), na.rm = TRUE) < 1e-6) break
   }
   Xfill
 }

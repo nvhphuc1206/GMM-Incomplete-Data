@@ -17,6 +17,7 @@ R_DIR <- file.path(SCRIPT_DIR, "..", "R")
 
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
+source(file.path(R_DIR, "regem.R"))
 source(file.path(R_DIR, "imputation_baseline.R"))
 source(file.path(R_DIR, "evaluation.R"))
 
@@ -51,6 +52,31 @@ run_experiment_dataset <- function(dataset_name,
   methods <- c("Proposed", "Mean", "Zero", "EM")
   metrics <- c("ACC", "NMI", "Fscore", "PUR")
 
+  # Fixed patterns per dataset (load or generate)
+  pats_file <- file.path(RESULTS_DIR, sprintf("%s_patterns.rds", dataset_name))
+  all_pats  <- local({
+    if (file.exists(pats_file)) {
+      sv <- tryCatch(readRDS(pats_file), error = function(e) NULL)
+      if (!is.null(sv) && isTRUE(sv$meta$N_PATTERNS == n_patterns) &&
+          isTRUE(sv$meta$n == n)) {
+        if (verbose) cat(sprintf("  Loaded patterns: %s\n", pats_file))
+        return(sv$patterns)
+      }
+    }
+    if (verbose) cat("  Generating fixed patterns...\n")
+    pt <- lapply(missing_ratios, function(ratio) {
+      lapply(seq_len(n_patterns), function(pat) {
+        seed_pat <- seed_base + pat * 1000L + round(ratio * 100)
+        Xm <- generate_missing(X_orig, ratio, seed = seed_pat)
+        is.na(Xm)
+      })
+    })
+    names(pt) <- as.character(missing_ratios)
+    saveRDS(list(meta     = list(N_PATTERNS = n_patterns, n = n, d = d),
+                 patterns = pt), pats_file)
+    pt
+  })
+
   results_by_ratio <- list()
 
   for (ratio in missing_ratios) {
@@ -63,9 +89,10 @@ run_experiment_dataset <- function(dataset_name,
 
     run_idx <- 1
     for (pat in seq_len(n_patterns)) {
-      seed_pat <- seed_base + pat * 1000 + round(ratio * 100)
-      X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
-      miss_mat <- is.na(X_miss)
+      # Use fixed pattern
+      miss_mat <- all_pats[[as.character(ratio)]][[pat]]
+      X_miss   <- X_orig
+      X_miss[miss_mat] <- NA_real_
       fills    <- prepare_all_fillings(X_miss)
       miss_empty <- matrix(FALSE, n, d)
 
