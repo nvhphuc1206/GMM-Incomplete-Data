@@ -1,19 +1,19 @@
-# run_seeds.R
-# Thực nghiệm trên Seeds dataset (210×7, 3 classes)
-# Kết quả kỳ vọng Table 2 "Ours" (trung bình 10-70%):
-#   ACC≈79.3%  NMI≈55.1%  F≈80.3%  PUR≈79.9%
+# run_avila.R
+# Thực nghiệm trên Avila dataset (20871×10, 12 classes)
+# Ước tính thời gian: ~8-16 giờ (sequential) / ~2-4 giờ (parallel)
 #
-# Seeds dataset: https://archive.ics.uci.edu/ml/datasets/seeds
-# Tải thủ công vào: data/seeds_dataset.txt (tab-separated, 7 features + 1 label)
+# Download: https://archive.ics.uci.edu/ml/datasets/Avila
+# Lưu vào : data/avila-tr.txt (CSV không có header, 10 features + 1 label cột cuối)
+#           Dùng file training set (avila-tr.txt), KHÔNG phải test set
 #
 # Cách dùng (trong RStudio, setwd vào experiments/):
-#   source("run_seeds.R")
+#   source("run_avila.R")
 
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !is.na(a[1])) a else b
 
 # ══ CONFIGURATION ════════════════════════════════════════════════════════════
-QUICK_MODE   <- FALSE   # TRUE = 5 pat × 10 inits (~3 min test)
-USE_PARALLEL <- TRUE    # FALSE = sequential (nicer live progress)
+QUICK_MODE   <- FALSE
+USE_PARALLEL <- TRUE    # Bắt buộc TRUE cho dataset rất lớn
 N_CORES      <- max(1L, parallel::detectCores() - 1L)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -28,7 +28,7 @@ if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
 if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
   stop("Không tìm thấy R/. Hãy setwd() vào experiments/ trước.")
 
-# ── Source all modules (thứ tự quan trọng) ───────────────────────────────────
+# ── Source all modules ────────────────────────────────────────────────────────
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))
@@ -40,37 +40,44 @@ source(file.path(R_DIR, "experiment_runner.R"))
 # ── Results directory ─────────────────────────────────────────────────────────
 RESULTS_DIR <- tryCatch({
   ofile <- sys.frame(1)$ofile %||% NULL
-  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "seeds")
-  else                  file.path(getwd(), "..", "results", "seeds")
-}, error = function(e) file.path(getwd(), "..", "results", "seeds"))
+  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "avila")
+  else                  file.path(getwd(), "..", "results", "avila")
+}, error = function(e) file.path(getwd(), "..", "results", "avila"))
 
-# ── Load Seeds dataset ────────────────────────────────────────────────────────
-# Thử load qua load_dataset(); nếu không có, download từ UCI
+# ── Load Avila dataset ────────────────────────────────────────────────────────
+# Thử load qua load_dataset(); nếu không có file, download từ UCI
+# UCI cung cấp file zip chứa avila-tr.txt (training) và avila-ts.txt (test)
 ds <- tryCatch(
-  load_dataset("seeds"),
+  load_dataset("avila"),
   error = function(e) {
-    # Fallback: download và parse thủ công
-    data_dir   <- tryCatch({
+    data_dir <- tryCatch({
       ofile <- sys.frame(1)$ofile %||% NULL
       if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "data")
       else                  file.path(getwd(), "..", "data")
     }, error = function(e2) file.path(getwd(), "..", "data"))
-
     if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
-    seeds_path <- file.path(data_dir, "seeds_dataset.txt")
 
-    if (!file.exists(seeds_path)) {
-      cat("Downloading Seeds dataset from UCI...\n")
-      tryCatch(
+    local_path <- file.path(data_dir, "avila-tr.txt")
+    if (!file.exists(local_path)) {
+      zip_path <- file.path(data_dir, "avila.zip")
+      cat("Downloading Avila dataset from UCI...\n")
+      tryCatch({
         utils::download.file(
-          "https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
-          seeds_path, quiet = FALSE),
-        error = function(e2)
-          stop("Cannot download Seeds. Please save manually to data/seeds_dataset.txt")
+          "https://archive.ics.uci.edu/ml/machine-learning-databases/00459/avila.zip",
+          zip_path, quiet = FALSE)
+        utils::unzip(zip_path, exdir = data_dir)
+        # File sau khi giải nén có thể nằm trong subfolder avila/
+        extracted <- list.files(data_dir, pattern = "avila-tr\\.txt",
+                                recursive = TRUE, full.names = TRUE)
+        if (length(extracted) > 0 && extracted[1] != local_path)
+          file.copy(extracted[1], local_path)
+      }, error = function(e2)
+        stop("Cannot download Avila. Please download avila.zip from UCI (dataset #459), unzip and save avila-tr.txt to data/avila-tr.txt")
       )
     }
-    df <- read.table(seeds_path, header = FALSE)
-    list(X = as.matrix(df[, 1:7]), labels = as.integer(df[, 8]))
+    df   <- read.csv(local_path, header = FALSE)
+    lbls <- as.integer(factor(df[, ncol(df)]))
+    list(X = as.matrix(df[, seq_len(ncol(df) - 1)]), labels = lbls)
   }
 )
 X_orig <- ds$X; labels <- ds$labels
@@ -78,7 +85,7 @@ k      <- length(unique(labels))
 
 # ── Run experiment ────────────────────────────────────────────────────────────
 run_experiment(list(
-  dataset_name   = "seeds",
+  dataset_name   = "avila",
   X_orig         = X_orig,
   labels         = labels,
   k              = k,
@@ -90,10 +97,9 @@ run_experiment(list(
   quick_mode     = QUICK_MODE,
   use_parallel   = USE_PARALLEL,
   n_cores        = N_CORES,
-  secs_per_run   = 0.07,   # ~70ms per run (Seeds lớn hơn Iris)
+  secs_per_run   = 5.0,   # ~5s per run (n=20871, k=12 — rất chậm)
 
-  paper_expected = list(
-    acc = c(Proposed = 79.3, Mean = 56.6, Zero = 53.9, EM = 64.7)
-    # DK values not reported in paper for Seeds
-  )
+  # Điền ACC% từ Table 2 bài báo khi có:
+  # paper_expected = list(acc = c(Proposed = ??, Mean = ??, Zero = ??, EM = ??))
+  paper_expected = NULL
 ))

@@ -50,6 +50,72 @@ generate_missing <- function(X, ratio, seed = NULL) {
   Xmiss
 }
 
+read_alcoholqcm_csv <- function(path) {
+  if (!file.exists(path)) {
+    stop("AlcoholQCM dataset not found: ", path)
+  }
+
+  first_line <- readLines(path, n = 1L, warn = FALSE)
+  sep <- if (length(first_line) > 0L && grepl(";", first_line, fixed = TRUE)) ";" else ","
+  df <- read.table(path, header = TRUE, sep = sep, dec = ".", check.names = TRUE)
+
+  if (ncol(df) == 11L) {
+    X <- as.matrix(df[, 1:10])
+    lbl_raw <- df[, 11]
+    labels <- if (is.numeric(lbl_raw) || is.integer(lbl_raw)) {
+      as.integer(lbl_raw)
+    } else {
+      as.integer(factor(lbl_raw))
+    }
+    return(list(
+      X = X,
+      labels = labels,
+      info = list(n = nrow(X), d = ncol(X), k = length(unique(labels)), name = "AlcoholQCM")
+    ))
+  }
+
+  if (ncol(df) == 15L) {
+    X <- as.matrix(df[, 1:10])
+    label_mat <- as.matrix(df[, 11:15])
+    if (!all(label_mat %in% c(0, 1))) {
+      stop("AlcoholQCM label columns must be binary one-hot encoded.")
+    }
+    if (any(rowSums(label_mat) != 1)) {
+      stop("AlcoholQCM one-hot label rows must contain exactly one active class.")
+    }
+    labels <- max.col(label_mat, ties.method = "first")
+    return(list(
+      X = X,
+      labels = labels,
+      info = list(n = nrow(X), d = ncol(X), k = length(unique(labels)), name = "AlcoholQCM")
+    ))
+  }
+
+  # Generic fallback: treat last column as label, all previous columns as numeric features.
+  if (ncol(df) >= 2L) {
+    Xdf <- df[, seq_len(ncol(df) - 1L), drop = FALSE]
+    Xdf[] <- lapply(Xdf, function(col) {
+      if (is.numeric(col) || is.integer(col)) return(as.numeric(col))
+      as.numeric(as.character(col))
+    })
+    X <- as.matrix(Xdf)
+
+    lbl_raw <- df[, ncol(df)]
+    labels <- if (is.numeric(lbl_raw) || is.integer(lbl_raw)) {
+      as.integer(lbl_raw)
+    } else {
+      as.integer(factor(lbl_raw))
+    }
+    return(list(
+      X = X,
+      labels = labels,
+      info = list(n = nrow(X), d = ncol(X), k = length(unique(labels)), name = "AlcoholQCM")
+    ))
+  }
+
+  stop("Unsupported AlcoholQCM format: got ", ncol(df), " columns.")
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Load UCI datasets
 #    Trả về list(X = matrix n×d, labels = integer vector n)
@@ -120,12 +186,7 @@ load_dataset <- function(name) {
       if (!file.exists(local_path)) {
         stop("AlcoholQCM dataset not found. Download from UCI and save to data/AlcoholQCM.csv")
       }
-      df <- read.csv(local_path, header = TRUE)
-      list(
-        X      = as.matrix(df[, 1:10]),
-        labels = as.integer(df[, 11]),
-        info   = list(n = 125, d = 10, k = 5, name = "AlcoholQCM")
-      )
+      read_alcoholqcm_csv(local_path)
     },
 
     "segment" = {

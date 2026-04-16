@@ -1,19 +1,18 @@
-# run_seeds.R
-# Thực nghiệm trên Seeds dataset (210×7, 3 classes)
-# Kết quả kỳ vọng Table 2 "Ours" (trung bình 10-70%):
-#   ACC≈79.3%  NMI≈55.1%  F≈80.3%  PUR≈79.9%
+# run_electricalgrid.R
+# Thực nghiệm trên Electrical Grid Stability dataset (10000×13, 2 classes)
+# Ước tính thời gian: ~4-8 giờ (sequential) / ~1-2 giờ (parallel)
 #
-# Seeds dataset: https://archive.ics.uci.edu/ml/datasets/seeds
-# Tải thủ công vào: data/seeds_dataset.txt (tab-separated, 7 features + 1 label)
+# Download: https://archive.ics.uci.edu/ml/datasets/Electrical+Grid+Stability+Simulated+Data
+# Lưu vào : data/Data_for_UCI_named.csv (header = TRUE, 13 features + label cột cuối)
 #
 # Cách dùng (trong RStudio, setwd vào experiments/):
-#   source("run_seeds.R")
+#   source("run_electricalgrid.R")
 
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !is.na(a[1])) a else b
 
 # ══ CONFIGURATION ════════════════════════════════════════════════════════════
-QUICK_MODE   <- FALSE   # TRUE = 5 pat × 10 inits (~3 min test)
-USE_PARALLEL <- TRUE    # FALSE = sequential (nicer live progress)
+QUICK_MODE   <- FALSE
+USE_PARALLEL <- TRUE    # Bắt buộc TRUE cho dataset rất lớn
 N_CORES      <- max(1L, parallel::detectCores() - 1L)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -28,7 +27,7 @@ if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
 if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
   stop("Không tìm thấy R/. Hãy setwd() vào experiments/ trước.")
 
-# ── Source all modules (thứ tự quan trọng) ───────────────────────────────────
+# ── Source all modules ────────────────────────────────────────────────────────
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))
@@ -40,37 +39,36 @@ source(file.path(R_DIR, "experiment_runner.R"))
 # ── Results directory ─────────────────────────────────────────────────────────
 RESULTS_DIR <- tryCatch({
   ofile <- sys.frame(1)$ofile %||% NULL
-  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "seeds")
-  else                  file.path(getwd(), "..", "results", "seeds")
-}, error = function(e) file.path(getwd(), "..", "results", "seeds"))
+  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "electricalgrid")
+  else                  file.path(getwd(), "..", "results", "electricalgrid")
+}, error = function(e) file.path(getwd(), "..", "results", "electricalgrid"))
 
-# ── Load Seeds dataset ────────────────────────────────────────────────────────
-# Thử load qua load_dataset(); nếu không có, download từ UCI
+# ── Load ElectricalGrid dataset ───────────────────────────────────────────────
+# Thử load qua load_dataset(); nếu không có file, download từ UCI
 ds <- tryCatch(
-  load_dataset("seeds"),
+  load_dataset("electricalgrid"),
   error = function(e) {
-    # Fallback: download và parse thủ công
-    data_dir   <- tryCatch({
+    data_dir <- tryCatch({
       ofile <- sys.frame(1)$ofile %||% NULL
       if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "data")
       else                  file.path(getwd(), "..", "data")
     }, error = function(e2) file.path(getwd(), "..", "data"))
-
     if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
-    seeds_path <- file.path(data_dir, "seeds_dataset.txt")
 
-    if (!file.exists(seeds_path)) {
-      cat("Downloading Seeds dataset from UCI...\n")
+    local_path <- file.path(data_dir, "Data_for_UCI_named.csv")
+    if (!file.exists(local_path)) {
+      cat("Downloading ElectricalGrid dataset from UCI...\n")
       tryCatch(
         utils::download.file(
-          "https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
-          seeds_path, quiet = FALSE),
+          "https://archive.ics.uci.edu/ml/machine-learning-databases/00471/Data_for_UCI_named.csv",
+          local_path, quiet = FALSE),
         error = function(e2)
-          stop("Cannot download Seeds. Please save manually to data/seeds_dataset.txt")
+          stop("Cannot download ElectricalGrid. Please download 'Data_for_UCI_named.csv' from UCI (dataset #471) and save to data/Data_for_UCI_named.csv")
       )
     }
-    df <- read.table(seeds_path, header = FALSE)
-    list(X = as.matrix(df[, 1:7]), labels = as.integer(df[, 8]))
+    df   <- read.csv(local_path, header = TRUE)
+    lbls <- as.integer(factor(df[, ncol(df)]))
+    list(X = as.matrix(df[, seq_len(ncol(df) - 1)]), labels = lbls)
   }
 )
 X_orig <- ds$X; labels <- ds$labels
@@ -78,7 +76,7 @@ k      <- length(unique(labels))
 
 # ── Run experiment ────────────────────────────────────────────────────────────
 run_experiment(list(
-  dataset_name   = "seeds",
+  dataset_name   = "electricalgrid",
   X_orig         = X_orig,
   labels         = labels,
   k              = k,
@@ -90,10 +88,9 @@ run_experiment(list(
   quick_mode     = QUICK_MODE,
   use_parallel   = USE_PARALLEL,
   n_cores        = N_CORES,
-  secs_per_run   = 0.07,   # ~70ms per run (Seeds lớn hơn Iris)
+  secs_per_run   = 2.0,   # ~2s per run (n=10000 — E-step O(n×k×d²) chậm)
 
-  paper_expected = list(
-    acc = c(Proposed = 79.3, Mean = 56.6, Zero = 53.9, EM = 64.7)
-    # DK values not reported in paper for Seeds
-  )
+  # Điền ACC% từ Table 2 bài báo khi có:
+  # paper_expected = list(acc = c(Proposed = ??, Mean = ??, Zero = ??, EM = ??))
+  paper_expected = NULL
 ))

@@ -9,7 +9,7 @@
 #   DATASET <- "seeds"; source("plot_results.R")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-if (!exists("DATASET"))   DATASET    <- "iris"
+if (!exists("DATASET"))   DATASET    <- "wine"
 if (!exists("SAVE_PNG"))  SAVE_PNG   <- TRUE
 if (!exists("SAVE_PDF"))  SAVE_PDF   <- TRUE
 if (!exists("SHOW_PLOT")) SHOW_PLOT  <- TRUE   # FALSE khi chạy batch
@@ -20,7 +20,7 @@ SCRIPT_DIR <- tryCatch(
   dirname(sys.frame(1)$ofile),
   error = function(e) getwd()
 )
-RESULTS_DIR <- file.path(SCRIPT_DIR, "..", "results/iris")
+RESULTS_DIR <- file.path(SCRIPT_DIR, "..", "results/wine")
 PLOTS_DIR   <- file.path(RESULTS_DIR, "plots")
 if (!dir.exists(PLOTS_DIR)) dir.create(PLOTS_DIR, recursive = TRUE)
 

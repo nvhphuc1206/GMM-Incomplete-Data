@@ -1,19 +1,18 @@
-# run_seeds.R
-# Thực nghiệm trên Seeds dataset (210×7, 3 classes)
+# run_wine.R
+# Thực nghiệm trên Wine dataset (178×13, 3 classes)
 # Kết quả kỳ vọng Table 2 "Ours" (trung bình 10-70%):
-#   ACC≈79.3%  NMI≈55.1%  F≈80.3%  PUR≈79.9%
+#   ACC≈87.0%  (Mean=58.0, Zero=74.8, EM=81.8)
 #
-# Seeds dataset: https://archive.ics.uci.edu/ml/datasets/seeds
-# Tải thủ công vào: data/seeds_dataset.txt (tab-separated, 7 features + 1 label)
+# Wine dataset có sẵn trong R package 'rattle' hoặc UCI
 #
 # Cách dùng (trong RStudio, setwd vào experiments/):
-#   source("run_seeds.R")
+#   source("run_wine.R")
 
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !is.na(a[1])) a else b
 
 # ══ CONFIGURATION ════════════════════════════════════════════════════════════
-QUICK_MODE   <- FALSE   # TRUE = 5 pat × 10 inits (~3 min test)
-USE_PARALLEL <- TRUE    # FALSE = sequential (nicer live progress)
+QUICK_MODE   <- FALSE
+USE_PARALLEL <- TRUE
 N_CORES      <- max(1L, parallel::detectCores() - 1L)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -28,7 +27,7 @@ if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
 if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
   stop("Không tìm thấy R/. Hãy setwd() vào experiments/ trước.")
 
-# ── Source all modules (thứ tự quan trọng) ───────────────────────────────────
+# ── Source all modules ────────────────────────────────────────────────────────
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))
@@ -40,37 +39,40 @@ source(file.path(R_DIR, "experiment_runner.R"))
 # ── Results directory ─────────────────────────────────────────────────────────
 RESULTS_DIR <- tryCatch({
   ofile <- sys.frame(1)$ofile %||% NULL
-  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "seeds")
-  else                  file.path(getwd(), "..", "results", "seeds")
-}, error = function(e) file.path(getwd(), "..", "results", "seeds"))
+  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "wine")
+  else                  file.path(getwd(), "..", "results", "wine")
+}, error = function(e) file.path(getwd(), "..", "results", "wine"))
 
-# ── Load Seeds dataset ────────────────────────────────────────────────────────
-# Thử load qua load_dataset(); nếu không có, download từ UCI
+# ── Load Wine dataset ─────────────────────────────────────────────────────────
 ds <- tryCatch(
-  load_dataset("seeds"),
+  load_dataset("wine"),
   error = function(e) {
-    # Fallback: download và parse thủ công
-    data_dir   <- tryCatch({
-      ofile <- sys.frame(1)$ofile %||% NULL
-      if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "data")
-      else                  file.path(getwd(), "..", "data")
-    }, error = function(e2) file.path(getwd(), "..", "data"))
+    # Fallback: dùng datasets::Wine từ package rattle hoặc download UCI
+    if (requireNamespace("rattle", quietly = TRUE)) {
+      data("wine", package = "rattle", envir = environment())
+      wine_df <- get("wine", envir = environment())
+      list(X = scale(as.matrix(wine_df[, -1])),
+           labels = as.integer(wine_df[, 1]))
+    } else {
+      data_dir <- tryCatch({
+        ofile2 <- sys.frame(1)$ofile %||% NULL
+        if (!is.null(ofile2)) file.path(dirname(dirname(ofile2)), "data")
+        else                   file.path(getwd(), "..", "data")
+      }, error = function(e2) file.path(getwd(), "..", "data"))
 
-    if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
-    seeds_path <- file.path(data_dir, "seeds_dataset.txt")
+      if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
+      wine_path <- file.path(data_dir, "wine.data")
 
-    if (!file.exists(seeds_path)) {
-      cat("Downloading Seeds dataset from UCI...\n")
-      tryCatch(
+      if (!file.exists(wine_path)) {
+        cat("Downloading Wine dataset from UCI...\n")
         utils::download.file(
-          "https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
-          seeds_path, quiet = FALSE),
-        error = function(e2)
-          stop("Cannot download Seeds. Please save manually to data/seeds_dataset.txt")
-      )
+          "https://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data",
+          wine_path, quiet = FALSE)
+      }
+      df <- read.csv(wine_path, header = FALSE)
+      list(X = scale(as.matrix(df[, -1])),
+           labels = as.integer(df[, 1]))
     }
-    df <- read.table(seeds_path, header = FALSE)
-    list(X = as.matrix(df[, 1:7]), labels = as.integer(df[, 8]))
   }
 )
 X_orig <- ds$X; labels <- ds$labels
@@ -78,7 +80,7 @@ k      <- length(unique(labels))
 
 # ── Run experiment ────────────────────────────────────────────────────────────
 run_experiment(list(
-  dataset_name   = "seeds",
+  dataset_name   = "wine",
   X_orig         = X_orig,
   labels         = labels,
   k              = k,
@@ -90,10 +92,9 @@ run_experiment(list(
   quick_mode     = QUICK_MODE,
   use_parallel   = USE_PARALLEL,
   n_cores        = N_CORES,
-  secs_per_run   = 0.07,   # ~70ms per run (Seeds lớn hơn Iris)
+  secs_per_run   = 0.15,   # ~150ms per run (Wine: 13D, Sigma inversion chậm hơn)
 
   paper_expected = list(
-    acc = c(Proposed = 79.3, Mean = 56.6, Zero = 53.9, EM = 64.7)
-    # DK values not reported in paper for Seeds
+    acc = c(Proposed = 87.0, Mean = 58.0, Zero = 74.8, EM = 81.8)
   )
 ))

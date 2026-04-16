@@ -1,19 +1,18 @@
-# run_seeds.R
-# Thực nghiệm trên Seeds dataset (210×7, 3 classes)
-# Kết quả kỳ vọng Table 2 "Ours" (trung bình 10-70%):
-#   ACC≈79.3%  NMI≈55.1%  F≈80.3%  PUR≈79.9%
+# run_segment.R
+# Thực nghiệm trên Image Segmentation dataset (2310×18, 7 classes)
+# Ước tính thời gian: ~2-4 giờ (sequential) / ~30-60 min (parallel, 7 workers)
 #
-# Seeds dataset: https://archive.ics.uci.edu/ml/datasets/seeds
-# Tải thủ công vào: data/seeds_dataset.txt (tab-separated, 7 features + 1 label)
+# Download: https://archive.ics.uci.edu/ml/datasets/Image+Segmentation
+# Lưu vào : data/segment.dat (tab/space-separated, 18 features + 1 label cột cuối)
 #
 # Cách dùng (trong RStudio, setwd vào experiments/):
-#   source("run_seeds.R")
+#   source("run_segment.R")
 
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !is.na(a[1])) a else b
 
 # ══ CONFIGURATION ════════════════════════════════════════════════════════════
-QUICK_MODE   <- FALSE   # TRUE = 5 pat × 10 inits (~3 min test)
-USE_PARALLEL <- TRUE    # FALSE = sequential (nicer live progress)
+QUICK_MODE   <- FALSE
+USE_PARALLEL <- TRUE    # Bắt buộc TRUE cho dataset lớn
 N_CORES      <- max(1L, parallel::detectCores() - 1L)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -28,7 +27,7 @@ if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
 if (!file.exists(file.path(R_DIR, "gmm_incomplete.R")))
   stop("Không tìm thấy R/. Hãy setwd() vào experiments/ trước.")
 
-# ── Source all modules (thứ tự quan trọng) ───────────────────────────────────
+# ── Source all modules ────────────────────────────────────────────────────────
 source(file.path(R_DIR, "data_utils.R"))
 source(file.path(R_DIR, "gmm_incomplete.R"))
 source(file.path(R_DIR, "regem.R"))
@@ -40,37 +39,42 @@ source(file.path(R_DIR, "experiment_runner.R"))
 # ── Results directory ─────────────────────────────────────────────────────────
 RESULTS_DIR <- tryCatch({
   ofile <- sys.frame(1)$ofile %||% NULL
-  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "seeds")
-  else                  file.path(getwd(), "..", "results", "seeds")
-}, error = function(e) file.path(getwd(), "..", "results", "seeds"))
+  if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "results", "segment")
+  else                  file.path(getwd(), "..", "results", "segment")
+}, error = function(e) file.path(getwd(), "..", "results", "segment"))
 
-# ── Load Seeds dataset ────────────────────────────────────────────────────────
-# Thử load qua load_dataset(); nếu không có, download từ UCI
+# ── Load Segment dataset ──────────────────────────────────────────────────────
+# Thử load qua load_dataset(); nếu không có file, download từ UCI
+# File UCI: segmentation.test — 2310 dòng, cột 1 = class name, cột 2-19 = 18 features
 ds <- tryCatch(
-  load_dataset("seeds"),
+  load_dataset("segment"),
   error = function(e) {
-    # Fallback: download và parse thủ công
-    data_dir   <- tryCatch({
+    data_dir <- tryCatch({
       ofile <- sys.frame(1)$ofile %||% NULL
       if (!is.null(ofile)) file.path(dirname(dirname(ofile)), "data")
       else                  file.path(getwd(), "..", "data")
     }, error = function(e2) file.path(getwd(), "..", "data"))
-
     if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
-    seeds_path <- file.path(data_dir, "seeds_dataset.txt")
 
-    if (!file.exists(seeds_path)) {
-      cat("Downloading Seeds dataset from UCI...\n")
+    local_path <- file.path(data_dir, "segment.dat")
+    if (!file.exists(local_path)) {
+      cat("Downloading Segment dataset from UCI...\n")
       tryCatch(
         utils::download.file(
-          "https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
-          seeds_path, quiet = FALSE),
+          "https://archive.ics.uci.edu/ml/machine-learning-databases/image/segmentation.test",
+          local_path, quiet = FALSE),
         error = function(e2)
-          stop("Cannot download Seeds. Please save manually to data/seeds_dataset.txt")
+          stop("Cannot download Segment. Please download 'segmentation.test' from UCI (Image Segmentation dataset) and save to data/segment.dat")
       )
     }
-    df <- read.table(seeds_path, header = FALSE)
-    list(X = as.matrix(df[, 1:7]), labels = as.integer(df[, 8]))
+    # File có 5 dòng header → skip = 5; cột 1 = class (character), cột 2-19 = features
+    df   <- read.table(local_path, header = FALSE, skip = 5, sep = ",",
+                       stringsAsFactors = FALSE)
+    lbls <- as.integer(factor(df[, 1]))
+    # Reorder: label về cuối để khớp với data_utils.R (lưu lại file đã xử lý)
+    df_out <- cbind(df[, 2:ncol(df)], lbls)
+    write.table(df_out, local_path, row.names = FALSE, col.names = FALSE)
+    list(X = as.matrix(df[, 2:ncol(df)]), labels = lbls)
   }
 )
 X_orig <- ds$X; labels <- ds$labels
@@ -78,7 +82,7 @@ k      <- length(unique(labels))
 
 # ── Run experiment ────────────────────────────────────────────────────────────
 run_experiment(list(
-  dataset_name   = "seeds",
+  dataset_name   = "segment",
   X_orig         = X_orig,
   labels         = labels,
   k              = k,
@@ -90,10 +94,9 @@ run_experiment(list(
   quick_mode     = QUICK_MODE,
   use_parallel   = USE_PARALLEL,
   n_cores        = N_CORES,
-  secs_per_run   = 0.07,   # ~70ms per run (Seeds lớn hơn Iris)
+  secs_per_run   = 1.0,   # ~1s per run (n=2310, d=18, k=7 — Sigma inversion chậm)
 
-  paper_expected = list(
-    acc = c(Proposed = 79.3, Mean = 56.6, Zero = 53.9, EM = 64.7)
-    # DK values not reported in paper for Seeds
-  )
+  # Điền ACC% từ Table 2 bài báo khi có:
+  # paper_expected = list(acc = c(Proposed = ??, Mean = ??, Zero = ??, EM = ??))
+  paper_expected = NULL
 ))
