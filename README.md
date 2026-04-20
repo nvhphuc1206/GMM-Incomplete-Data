@@ -51,8 +51,18 @@ gmm-incomplete-r/
 
 ## Installation
 
+This project runs on **base R only** — no required external packages.
+
 ```r
-install.packages(c("clue", "aricode", "parallel"))
+# Verify your environment (run once):
+source("setup.R")
+```
+
+**R >= 4.2.0** is required (uses the native pipe `|>`).
+
+Optional: install `aricode` for faster NMI computation (a pure-R fallback is used otherwise):
+```r
+install.packages("aricode")
 ```
 
 ---
