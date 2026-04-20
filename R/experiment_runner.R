@@ -81,17 +81,19 @@
 
 # ── Per-pattern worker (dataset-agnostic) ────────────────────────────────────
 # args fields: pat, ratio, X_orig, labels, k, n, d,
-#              N_INITS, SEED_BASE, KM_NSTART, miss_mat (or NULL)
+#              N_INITS, SEED_BASE, KM_NSTART, SIGMA_SHIFT, miss_mat (or NULL)
 
 .run_one_pattern <- function(args) {
-  pat       <- args$pat
-  ratio     <- args$ratio
-  X_orig    <- args$X_orig
-  labels    <- args$labels
-  k         <- args$k;       n <- args$n; d <- args$d
-  N_INITS   <- args$N_INITS
-  SEED_BASE <- args$SEED_BASE
-  KM_NSTART <- args$KM_NSTART
+  pat         <- args$pat
+  ratio       <- args$ratio
+  X_orig      <- args$X_orig
+  labels      <- args$labels
+  k           <- args$k;       n <- args$n; d <- args$d
+  N_INITS     <- args$N_INITS
+  SEED_BASE   <- args$SEED_BASE
+  KM_NSTART   <- args$KM_NSTART
+  `%||%` <- function(a, b) if (!is.null(a)) a else b
+  SIGMA_SHIFT <- args$SIGMA_SHIFT %||% 1e-8
 
   METHODS    <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
   METRICS    <- c("ACC", "NMI", "Fscore", "PUR")
@@ -119,15 +121,19 @@
     tryCatch({
       set.seed(seed_i)
       km_c   <- kmeans(fills$data_em, centers = k, nstart = KM_NSTART, iter.max = 100)$centers
-      result <- gmm_incomplete(fills$data_em, k, miss_mat, km_c, 500, 1e-4)
+      result <- gmm_incomplete(fills$data_em, k, miss_mat, km_c, 500, 1e-4, SIGMA_SHIFT)
       res_pat$Proposed[init_i, ] <- compute_metrics(labels, result$labels)
-    }, error = function(e) NULL)
+    }, error = function(e) {
+      # Log init failures — important for datasets with small clusters (e.g. Glass k=6)
+      if (getOption("gmm.verbose_errors", FALSE))
+        message(sprintf("Proposed error [pat=%d init=%d ratio=%.1f]: %s", pat, init_i, ratio, conditionMessage(e)))
+    })
 
     # ── GMM + Mean imputation ───────────────────────────────────────────────
     tryCatch({
       set.seed(seed_i)
       km_c   <- kmeans(fills$data_mean, centers = k, nstart = KM_NSTART, iter.max = 100)$centers
-      result <- gmm_incomplete(fills$data_mean, k, miss_empty, km_c, 500, 1e-4)
+      result <- gmm_incomplete(fills$data_mean, k, miss_empty, km_c, 500, 1e-4, SIGMA_SHIFT)
       res_pat$Mean[init_i, ] <- compute_metrics(labels, result$labels)
     }, error = function(e) NULL)
 
@@ -135,7 +141,7 @@
     tryCatch({
       set.seed(seed_i)
       km_c   <- kmeans(fills$data_zero, centers = k, nstart = KM_NSTART, iter.max = 100)$centers
-      result <- gmm_incomplete(fills$data_zero, k, miss_empty, km_c, 500, 1e-4)
+      result <- gmm_incomplete(fills$data_zero, k, miss_empty, km_c, 500, 1e-4, SIGMA_SHIFT)
       res_pat$Zero[init_i, ] <- compute_metrics(labels, result$labels)
     }, error = function(e) NULL)
 
@@ -143,7 +149,7 @@
     tryCatch({
       set.seed(seed_i)
       km_c   <- kmeans(fills$data_em, centers = k, nstart = KM_NSTART, iter.max = 100)$centers
-      result <- gmm_incomplete(fills$data_em, k, miss_empty, km_c, 500, 1e-4)
+      result <- gmm_incomplete(fills$data_em, k, miss_empty, km_c, 500, 1e-4, SIGMA_SHIFT)
       res_pat$EM[init_i, ] <- compute_metrics(labels, result$labels)
     }, error = function(e) NULL)
 
@@ -229,6 +235,7 @@ run_experiment <- function(cfg) {
   n_patterns     <- cfg$n_patterns     %||% (if (quick_mode)  5L else 20L)
   seed_base      <- cfg$seed_base      %||% 42L
   km_nstart      <- cfg$km_nstart      %||% 3L
+  sigma_shift    <- cfg$sigma_shift    %||% 1e-8
   use_parallel   <- cfg$use_parallel   %||% TRUE
   n_cores        <- cfg$n_cores        %||% max(1L, parallel::detectCores() - 1L)
   secs_per_run   <- cfg$secs_per_run   %||% 0.05
@@ -324,7 +331,8 @@ run_experiment <- function(cfg) {
       pat      = pat,    ratio    = ratio,
       X_orig   = X_orig, labels   = labels,
       k = k, n = n, d = d,
-      N_INITS   = n_inits, SEED_BASE = seed_base, KM_NSTART = km_nstart,
+      N_INITS     = n_inits, SEED_BASE = seed_base,
+      KM_NSTART   = km_nstart, SIGMA_SHIFT = sigma_shift,
       miss_mat  = if (!is.null(all_patterns[[ratio_str]])) all_patterns[[ratio_str]][[pat]] else NULL
     ))
 

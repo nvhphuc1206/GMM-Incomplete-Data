@@ -3,5 +3,8 @@
 .R*
 gmm-incomplete-r.Rproj
 
+# Data
+data/
+
 # Results
 results/

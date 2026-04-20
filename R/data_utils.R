@@ -135,19 +135,23 @@ load_dataset <- function(name) {
 
     "seeds" = {
       # UCI Seeds dataset: 210×7, 3 classes
-      # Thử load từ file local trước, fallback tải về
       local_path <- file.path(
         dirname(dirname(sys.frame(1)$ofile %||% ".")),
         "data", "seeds_dataset.txt"
       )
-      if (file.exists(local_path)) {
-        df <- read.table(local_path, header = FALSE)
-      } else {
-        df <- read.table(
-          "https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
-          header = FALSE
+      if (!file.exists(local_path)) {
+        cat("Downloading Seeds dataset from UCI...\n")
+        data_dir <- dirname(local_path)
+        if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
+        tryCatch(
+          utils::download.file(
+            "https://archive.ics.uci.edu/ml/machine-learning-databases/00236/seeds_dataset.txt",
+            local_path, quiet = FALSE),
+          error = function(e)
+            stop("Cannot download Seeds. Save 'seeds_dataset.txt' from UCI to data/seeds_dataset.txt")
         )
       }
+      df <- read.table(local_path, header = FALSE)
       list(
         X      = as.matrix(df[, 1:7]),
         labels = as.integer(df[, 8]),
@@ -161,18 +165,84 @@ load_dataset <- function(name) {
         dirname(dirname(sys.frame(1)$ofile %||% ".")),
         "data", "wine.data"
       )
-      if (file.exists(local_path)) {
-        df <- read.csv(local_path, header = FALSE)
-      } else {
-        df <- read.csv(
-          "https://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data",
-          header = FALSE
+      if (!file.exists(local_path)) {
+        cat("Downloading Wine dataset from UCI...\n")
+        data_dir <- dirname(local_path)
+        if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
+        tryCatch(
+          utils::download.file(
+            "https://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data",
+            local_path, quiet = FALSE),
+          error = function(e)
+            stop("Cannot download Wine. Save 'wine.data' from UCI to data/wine.data")
         )
       }
+      df <- read.csv(local_path, header = FALSE)
       list(
         X      = as.matrix(df[, 2:14]),
         labels = as.integer(df[, 1]),
         info   = list(n = 178, d = 13, k = 3, name = "Wine")
+      )
+    },
+
+    "vehicle" = {
+      # UCI Vehicle Silhouettes (Statlog): 846×18, 4 classes
+      # UCI gồm 4 file riêng: bus.dat, opel.dat, saab.dat, van.dat
+      # Mỗi file: 18 features (integer) + label text ở cột cuối
+      data_dir <- file.path(
+        dirname(dirname(sys.frame(1)$ofile %||% ".")), "data"
+      )
+      combined_path <- file.path(data_dir, "vehicle.dat")
+
+      if (file.exists(combined_path)) {
+        df   <- read.table(combined_path, header = FALSE)
+        lbls <- as.integer(factor(df[, ncol(df)]))
+        X    <- as.matrix(df[, seq_len(ncol(df) - 1L)])
+      } else {
+        # Đọc từng file class, ghép lại
+        class_files <- c("bus.dat", "opel.dat", "saab.dat", "van.dat")
+        parts <- lapply(class_files, function(fname) {
+          p <- file.path(data_dir, fname)
+          if (!file.exists(p))
+            stop("Vehicle file not found: ", p,
+                 "\nDownload from UCI Statlog Vehicle and save to data/")
+          read.table(p, header = FALSE)
+        })
+        df   <- do.call(rbind, parts)
+        lbls <- as.integer(factor(df[, ncol(df)]))
+        X    <- as.matrix(df[, seq_len(ncol(df) - 1L)])
+      }
+      list(
+        X      = X,
+        labels = lbls,
+        info   = list(n = nrow(X), d = 18L, k = 4L, name = "Vehicle")
+      )
+    },
+
+    "glass" = {
+      # UCI Glass Identification: 214×9, 6 classes (class 4 absent in data)
+      # Col 1 = ID (dropped), col 2-10 = 9 features, col 11 = label (1-7)
+      local_path <- file.path(
+        dirname(dirname(sys.frame(1)$ofile %||% ".")),
+        "data", "glass.data"
+      )
+      if (!file.exists(local_path)) {
+        cat("Downloading Glass Identification dataset from UCI...\n")
+        data_dir <- dirname(local_path)
+        if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
+        tryCatch(
+          utils::download.file(
+            "https://archive.ics.uci.edu/ml/machine-learning-databases/glass/glass.data",
+            local_path, quiet = FALSE),
+          error = function(e)
+            stop("Cannot download Glass. Save 'glass.data' from UCI to data/glass.data")
+        )
+      }
+      df <- read.csv(local_path, header = FALSE)
+      list(
+        X      = as.matrix(df[, 2:10]),
+        labels = as.integer(factor(df[, 11])),   # remap 1-7 → 1-6
+        info   = list(n = 214, d = 9, k = 6, name = "Glass")
       )
     },
 
@@ -262,7 +332,7 @@ load_dataset <- function(name) {
     },
 
     stop("Unknown dataset: ", name,
-         ". Available: iris, seeds, wine, alcoholqcm, segment, electricalgrid, avila, letter")
+         ". Available: iris, seeds, wine, glass, vehicle, alcoholqcm, segment, electricalgrid, avila, letter")
   )
 }
 
