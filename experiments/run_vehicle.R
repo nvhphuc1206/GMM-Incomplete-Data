@@ -47,8 +47,9 @@ RESULTS_DIR <- tryCatch({
 }, error = function(e) file.path(getwd(), "..", "results", "vehicle"))
 
 # ── Load Vehicle dataset ──────────────────────────────────────────────────────
-# Thử load qua load_dataset(); nếu không có file, download từ UCI
-# UCI cung cấp 4 file riêng (bus/opel/saab/van) — tải từng file rồi ghép lại
+# UCI zip (mới): https://archive.ics.uci.edu/static/public/149/statlog+vehicle+silhouettes.zip
+# Nội dung zip: xaa.dat ... xai.dat (mixed classes, không phải per-class)
+# Format mỗi dòng: 18 features (integer) + label text (bus/opel/saab/van)
 ds <- tryCatch(
   load_dataset("vehicle"),
   error = function(e) {
@@ -59,40 +60,40 @@ ds <- tryCatch(
     }, error = function(e2) file.path(getwd(), "..", "data"))
     if (!dir.exists(data_dir)) dir.create(data_dir, recursive = TRUE)
 
-    # Download từng file class nếu chưa có
-    base_url    <- "https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/vehicle"
-    class_files <- c("bus.dat", "opel.dat", "saab.dat", "van.dat")
+    combined_path <- file.path(data_dir, "vehicle.dat")
+    if (!file.exists(combined_path)) {
+      zip_url  <- "https://archive.ics.uci.edu/static/public/149/statlog+vehicle+silhouettes.zip"
+      zip_path <- file.path(data_dir, "vehicle_raw.zip")
 
-    for (fname in class_files) {
-      local_f <- file.path(data_dir, fname)
-      if (!file.exists(local_f)) {
-        cat(sprintf("Downloading %s from UCI...\n", fname))
-        tryCatch(
-          utils::download.file(
-            paste0(base_url, "/", fname),
-            local_f, quiet = FALSE),
-          error = function(e2)
-            stop(sprintf(
-              "Cannot download %s. Please download from UCI Statlog Vehicle dataset and save to data/%s",
-              fname, fname))
-        )
-      }
+      cat("Downloading Vehicle Silhouettes dataset from UCI...\n")
+      tryCatch(
+        utils::download.file(zip_url, zip_path, mode = "wb", quiet = FALSE),
+        error = function(e2)
+          stop("Cannot download Vehicle dataset. Download manually from:\n",
+               "  https://archive.ics.uci.edu/dataset/149/statlog+vehicle+silhouettes\n",
+               "Extract xaa.dat...xai.dat and save to data/")
+      )
+
+      # Extract tất cả x*.dat từ zip
+      extracted <- utils::unzip(zip_path, exdir = data_dir)
+      dat_files <- extracted[grepl("^x[a-z]+\\.dat$", basename(extracted))]
+      if (length(dat_files) == 0)
+        stop("No x*.dat files found in Vehicle zip. Check zip contents.")
+
+      # Ghép tất cả files thành 1
+      parts <- lapply(sort(dat_files), function(f) read.table(f, header = FALSE))
+      df    <- do.call(rbind, parts)
+
+      # Lưu file ghép, xoá zip và các file tạm
+      write.table(df, combined_path, row.names = FALSE, col.names = FALSE, quote = FALSE)
+      file.remove(zip_path)
+      file.remove(dat_files)
+      cat(sprintf("Combined file saved: %s (%d rows)\n", combined_path, nrow(df)))
     }
 
-    # Đọc từng file, ghép lại thành 1 data frame
-    parts <- lapply(class_files, function(fname) {
-      read.table(file.path(data_dir, fname), header = FALSE)
-    })
-    df   <- do.call(rbind, parts)
+    df   <- read.table(combined_path, header = FALSE)
     lbls <- as.integer(factor(df[, ncol(df)]))
     X    <- as.matrix(df[, seq_len(ncol(df) - 1L)])
-
-    # Lưu file ghép để lần sau dùng trực tiếp
-    combined_path <- file.path(data_dir, "vehicle.dat")
-    write.table(df, combined_path, row.names = FALSE, col.names = FALSE,
-                quote = FALSE)
-    cat(sprintf("Combined file saved: %s\n", combined_path))
-
     list(X = X, labels = lbls)
   }
 )
@@ -113,7 +114,8 @@ run_experiment(list(
   quick_mode     = QUICK_MODE,
   use_parallel   = USE_PARALLEL,
   n_cores        = N_CORES,
-  secs_per_run   = 0.15,   # ~150ms (n=846, d=18 — tương đương Wine về kích thước)
+  secs_per_run   = 0.15,        # ~150ms (n=846, d=18)
+  standardize_baselines = TRUE, # F12 RMS=474 vs F15 RMS=8 → scale ratio ~60x
 
   # Vehicle không có trong Table 2 bài báo — dataset bổ sung
   paper_expected = NULL

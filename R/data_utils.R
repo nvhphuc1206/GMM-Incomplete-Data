@@ -186,32 +186,23 @@ load_dataset <- function(name) {
     },
 
     "vehicle" = {
-      # UCI Vehicle Silhouettes (Statlog): 846×18, 4 classes
-      # UCI gồm 4 file riêng: bus.dat, opel.dat, saab.dat, van.dat
-      # Mỗi file: 18 features (integer) + label text ở cột cuối
+      # UCI Vehicle Silhouettes (Statlog): 846×18, 4 classes (bus/opel/saab/van)
+      # New UCI zip: https://archive.ics.uci.edu/static/public/149/statlog+vehicle+silhouettes.zip
+      # Zip contains xaa.dat...xai.dat (mixed classes). run_vehicle.R downloads
+      # and merges these into data/vehicle.dat on first run.
       data_dir <- file.path(
         dirname(dirname(sys.frame(1)$ofile %||% ".")), "data"
       )
       combined_path <- file.path(data_dir, "vehicle.dat")
 
-      if (file.exists(combined_path)) {
-        df   <- read.table(combined_path, header = FALSE)
-        lbls <- as.integer(factor(df[, ncol(df)]))
-        X    <- as.matrix(df[, seq_len(ncol(df) - 1L)])
-      } else {
-        # Đọc từng file class, ghép lại
-        class_files <- c("bus.dat", "opel.dat", "saab.dat", "van.dat")
-        parts <- lapply(class_files, function(fname) {
-          p <- file.path(data_dir, fname)
-          if (!file.exists(p))
-            stop("Vehicle file not found: ", p,
-                 "\nDownload from UCI Statlog Vehicle and save to data/")
-          read.table(p, header = FALSE)
-        })
-        df   <- do.call(rbind, parts)
-        lbls <- as.integer(factor(df[, ncol(df)]))
-        X    <- as.matrix(df[, seq_len(ncol(df) - 1L)])
-      }
+      if (!file.exists(combined_path))
+        stop("Vehicle data not found: ", combined_path,
+             "\nRun experiments/run_vehicle.R to auto-download, or download manually from:\n",
+             "  https://archive.ics.uci.edu/dataset/149/statlog+vehicle+silhouettes")
+
+      df   <- read.table(combined_path, header = FALSE)
+      lbls <- as.integer(factor(df[, ncol(df)]))
+      X    <- as.matrix(df[, seq_len(ncol(df) - 1L)])
       list(
         X      = X,
         labels = lbls,

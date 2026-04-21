@@ -9,7 +9,7 @@
 #   DATASET <- "seeds"; source("plot_results.R")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-if (!exists("DATASET"))   DATASET    <- "glass"
+if (!exists("DATASET"))   DATASET    <- "vehicle"
 if (!exists("SAVE_PNG"))  SAVE_PNG   <- TRUE
 if (!exists("SAVE_PDF"))  SAVE_PDF   <- TRUE
 if (!exists("SHOW_PLOT")) SHOW_PLOT  <- TRUE   # FALSE khi chạy batch
