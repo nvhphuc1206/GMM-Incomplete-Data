@@ -93,7 +93,8 @@
   SEED_BASE   <- args$SEED_BASE
   KM_NSTART   <- args$KM_NSTART
   `%||%` <- function(a, b) if (!is.null(a)) a else b
-  SIGMA_SHIFT <- args$SIGMA_SHIFT %||% 1e-8
+  SIGMA_SHIFT           <- args$SIGMA_SHIFT           %||% 1e-8
+  STANDARDIZE_BASELINES <- args$STANDARDIZE_BASELINES %||% FALSE
 
   METHODS    <- c("Proposed", "Mean", "Zero", "EM", "DK_Mean", "DK_Zero", "DK_EM")
   METRICS    <- c("ACC", "NMI", "Fscore", "PUR")
@@ -112,7 +113,7 @@
     X_miss   <- generate_missing(X_orig, ratio, seed = seed_pat)
     miss_mat <- is.na(X_miss)
   }
-  fills <- prepare_all_fillings(X_miss)
+  fills <- prepare_all_fillings(X_miss, standardize_baselines = STANDARDIZE_BASELINES)
 
   for (init_i in seq_len(N_INITS)) {
     seed_i <- SEED_BASE + pat * 1000L + round(ratio * 100) * 100L + init_i
@@ -233,10 +234,11 @@ run_experiment <- function(cfg) {
   quick_mode     <- cfg$quick_mode     %||% FALSE
   n_inits        <- cfg$n_inits        %||% (if (quick_mode) 10L else 50L)
   n_patterns     <- cfg$n_patterns     %||% (if (quick_mode)  5L else 20L)
-  seed_base      <- cfg$seed_base      %||% 42L
-  km_nstart      <- cfg$km_nstart      %||% 3L
-  sigma_shift    <- cfg$sigma_shift    %||% 1e-8
-  use_parallel   <- cfg$use_parallel   %||% TRUE
+  seed_base             <- cfg$seed_base             %||% 42L
+  km_nstart             <- cfg$km_nstart             %||% 3L
+  sigma_shift           <- cfg$sigma_shift           %||% 1e-8
+  standardize_baselines <- cfg$standardize_baselines %||% FALSE
+  use_parallel          <- cfg$use_parallel          %||% TRUE
   n_cores        <- cfg$n_cores        %||% max(1L, parallel::detectCores() - 1L)
   secs_per_run   <- cfg$secs_per_run   %||% 0.05
 
@@ -331,8 +333,9 @@ run_experiment <- function(cfg) {
       pat      = pat,    ratio    = ratio,
       X_orig   = X_orig, labels   = labels,
       k = k, n = n, d = d,
-      N_INITS     = n_inits, SEED_BASE = seed_base,
-      KM_NSTART   = km_nstart, SIGMA_SHIFT = sigma_shift,
+      N_INITS               = n_inits,  SEED_BASE = seed_base,
+      KM_NSTART             = km_nstart, SIGMA_SHIFT = sigma_shift,
+      STANDARDIZE_BASELINES = standardize_baselines,
       miss_mat  = if (!is.null(all_patterns[[ratio_str]])) all_patterns[[ratio_str]][[pat]] else NULL
     ))
 

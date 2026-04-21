@@ -91,12 +91,15 @@ em_filling <- function(X, max_iter = 10L, stagtol = 5e-2) {
 #      $data_em   : standardized + EM fill
 #      $data_std  : standardized với NA giữ nguyên (để track missing)
 # ─────────────────────────────────────────────────────────────────────────────
-prepare_all_fillings <- function(X_raw) {
+prepare_all_fillings <- function(X_raw, standardize_baselines = FALSE) {
   # X_raw: raw data gốc (có NA = missing positions đã được tạo)
-  # Source data_utils.R cần được load trước
+  # standardize_baselines: nếu TRUE, Mean/DK_Mean baseline cũng dùng
+  #   data đã chuẩn hóa (mean_fill → standardize_rms). Dùng cho datasets
+  #   có features khác scale lớn (e.g. Glass: Si~72, Fe~0.06).
+  #   Mặc định FALSE để giữ đúng behavior MATLAB gốc (Iris/Seeds/Wine).
 
   # 1. Mean fill trên raw data (CHƯA chuẩn hóa) — như MATLAB data_mean
-  data_mean <- mean_filling(X_raw)
+  data_mean_raw <- mean_filling(X_raw)
 
   # 2. Chuẩn hóa RMS (NA được giữ nguyên)
   data_std <- standardize_rms(X_raw)
@@ -107,8 +110,11 @@ prepare_all_fillings <- function(X_raw) {
   # 4. EM fill trên data đã chuẩn hóa
   data_em <- em_filling(data_std)
 
+  # 5. (optional) Mean fill → standardize: công bằng hơn khi features khác scale
+  data_mean_std <- if (standardize_baselines) standardize_rms(data_mean_raw) else data_mean_raw
+
   list(
-    data_mean = data_mean,
+    data_mean = data_mean_std,   # raw hoặc std tuỳ standardize_baselines
     data_zero = data_zero,
     data_em   = data_em,
     data_std  = data_std

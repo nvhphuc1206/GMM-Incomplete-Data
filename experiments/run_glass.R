@@ -81,6 +81,9 @@ k      <- length(unique(labels))
 # - k=6 với lớp nhỏ nhất chỉ 9 mẫu (d=9) → covariance gần singular
 # - km_nstart=10 giúp khởi tạo tốt hơn với k lớn và lớp mất cân bằng
 # - sigma_shift=1e-6 thay vì default 1e-8 để ổn định số học cho M-step 2
+# - standardize_baselines=TRUE: Mean baseline dùng (mean_fill → standardize_rms)
+#   thay vì raw data. Glass có Si~72 >> Fe~0.06 nên raw data làm lệch so sánh.
+#   Không dùng cho Iris/Seeds/Wine (features cùng scale, khớp MATLAB gốc).
 run_experiment(list(
   dataset_name   = "glass",
   X_orig         = X_orig,
@@ -94,9 +97,10 @@ run_experiment(list(
   quick_mode     = QUICK_MODE,
   use_parallel   = USE_PARALLEL,
   n_cores        = N_CORES,
-  secs_per_run   = 0.15,   # ~150ms (k=6, d=9 — nặng hơn Iris ~3x)
-  km_nstart      = 10L,    # default=3; tăng cho k=6, lớp mất cân bằng
-  sigma_shift    = 1e-6,   # default=1e-8; tăng để ổn định solve(Sigma) với cluster nhỏ
+  secs_per_run   = 0.15,        # ~150ms (k=6, d=9 — nặng hơn Iris ~3x)
+  km_nstart      = 10L,         # default=3; tăng cho k=6, lớp mất cân bằng
+  sigma_shift    = 1e-6,        # default=1e-8; ổn định solve(Sigma) với cluster nhỏ
+  standardize_baselines = TRUE, # dùng standardized data cho tất cả methods
 
   # Glass không có trong Table 2 bài báo — đây là dataset bổ sung
   paper_expected = NULL
